@@ -1,5 +1,7 @@
 import os
 import torch
+
+import execution_context
 import folder_paths
 import comfy.model_management as mm
 from comfy.utils import ProgressBar, load_torch_file
@@ -104,6 +106,9 @@ class DownloadAndLoadMochiModel:
                 "cublas_ops": ("BOOLEAN", {"tooltip": "tested on 4090, unsure of gpu requirements, enables faster linear ops for the GGUF models, for more info:'https://github.com/aredden/torch-cublas-hgemm'",}),
                 "rms_norm_func": (["default", "flash_attn_triton", "flash_attn", "apex"],{"tooltip": "RMSNorm function to use, flash_attn if available seems to be faster, apex untested",}),
             },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+            }
         }
 
     RETURN_TYPES = ("MOCHIMODEL", "MOCHIVAE",)
@@ -112,7 +117,7 @@ class DownloadAndLoadMochiModel:
     CATEGORY = "MochiWrapper"
     DESCRIPTION = "Downloads and loads the selected Mochi model from Huggingface"
 
-    def loadmodel(self, model, vae, precision, attention_mode, trigger=None, compile_args=None, cublas_ops=False, rms_norm_func="default"):
+    def loadmodel(self, model, vae, precision, attention_mode, trigger=None, compile_args=None, cublas_ops=False, rms_norm_func="default", context: execution_context.ExecutionContext=None):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -193,10 +198,10 @@ class DownloadAndLoadMochiModel:
     
 class MochiModelLoader:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": { 
-                "model_name": (folder_paths.get_filename_list("diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load.",}),
+                "model_name": (folder_paths.get_filename_list(context, "diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load.",}),
                 "precision": (["fp8_e4m3fn","fp8_e4m3fn_fast","fp16", "fp32", "bf16"], {"default": "fp8_e4m3fn"}),
                 "attention_mode": (["sdpa","flash_attn","sage_attn", "comfy"],),
             },
@@ -207,20 +212,23 @@ class MochiModelLoader:
                 "rms_norm_func": (["default", "flash_attn_triton", "flash_attn", "apex"],{"tooltip": "RMSNorm function to use, flash_attn if available seems to be faster, apex untested",}),
            
             },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+            }
         }
     RETURN_TYPES = ("MOCHIMODEL",)
     RETURN_NAMES = ("mochi_model",)
     FUNCTION = "loadmodel"
     CATEGORY = "MochiWrapper"
 
-    def loadmodel(self, model_name, precision, attention_mode, trigger=None, compile_args=None, cublas_ops=False, rms_norm_func="default"):
+    def loadmodel(self, model_name, precision, attention_mode, trigger=None, compile_args=None, cublas_ops=False, rms_norm_func="default", context: execution_context.ExecutionContext=None):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
         mm.soft_empty_cache()
 
         dtype = {"fp8_e4m3fn": torch.float8_e4m3fn, "fp8_e4m3fn_fast": torch.float8_e4m3fn, "bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
-        model_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
+        model_path = folder_paths.get_full_path_or_raise(context, "diffusion_models", model_name)
 
         model = T2VSynthMochiModel(
             device=device,
@@ -272,15 +280,18 @@ class MochiTorchCompileSettings:
     
 class MochiVAELoader:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": { 
-                "model_name": (folder_paths.get_filename_list("vae"), {"tooltip": "The name of the checkpoint (vae) to load."}),
+                "model_name": (folder_paths.get_filename_list(context, "vae"), {"tooltip": "The name of the checkpoint (vae) to load."}),
             },
             "optional": {
                 "torch_compile_args": ("MOCHICOMPILEARGS", {"tooltip": "Optional torch.compile arguments",}),
                 "precision": (["fp16", "fp32", "bf16"], {"default": "bf16"}),
             },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+            }
         }
 
     RETURN_TYPES = ("MOCHIVAE",)
@@ -288,7 +299,7 @@ class MochiVAELoader:
     FUNCTION = "loadmodel"
     CATEGORY = "MochiWrapper"
 
-    def loadmodel(self, model_name, torch_compile_args=None, precision="bf16"):
+    def loadmodel(self, model_name, torch_compile_args=None, precision="bf16", context: execution_context.ExecutionContext=None):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -296,7 +307,7 @@ class MochiVAELoader:
 
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
 
-        vae_path = folder_paths.get_full_path_or_raise("vae", model_name)
+        vae_path = folder_paths.get_full_path_or_raise(context, "vae", model_name)
 
         with (init_empty_weights() if is_accelerate_available else nullcontext()):
             vae = Decoder(
@@ -342,15 +353,18 @@ class MochiVAELoader:
     
 class MochiVAEEncoderLoader:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": { 
-                "model_name": (folder_paths.get_filename_list("vae"), {"tooltip": "The name of the checkpoint (vae) to load."}),
+                "model_name": (folder_paths.get_filename_list(context, "vae"), {"tooltip": "The name of the checkpoint (vae) to load."}),
             },
             "optional": {
                 "torch_compile_args": ("MOCHICOMPILEARGS", {"tooltip": "Optional torch.compile arguments",}),
                 "precision": (["fp16", "fp32", "bf16"], {"default": "bf16"}),
             },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+            }
         }
 
     RETURN_TYPES = ("MOCHIVAE",)
@@ -358,7 +372,7 @@ class MochiVAEEncoderLoader:
     FUNCTION = "loadmodel"
     CATEGORY = "MochiWrapper"
 
-    def loadmodel(self, model_name, torch_compile_args=None, precision="bf16"):
+    def loadmodel(self, model_name, torch_compile_args=None, precision="bf16", context: execution_context.ExecutionContext=None):
         
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -375,7 +389,7 @@ class MochiVAEEncoderLoader:
                     padding_mode="replicate"
                 )
 
-        vae_path = folder_paths.get_full_path_or_raise("vae", model_name)
+        vae_path = folder_paths.get_full_path_or_raise(context, "vae", model_name)
         
 
         # Create VAE encoder
@@ -523,6 +537,9 @@ class MochiSampler:
                 "opt_sigmas": ("SIGMAS", {"tooltip": "Override sigma schedule and steps"}),
                 "samples": ("LATENT", ),
                 "fastercache": ("FASTERCACHEARGS", {"tooltip": "Optional FasterCache settings"}),
+            },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
             }
         }
 
@@ -531,7 +548,7 @@ class MochiSampler:
     FUNCTION = "process"
     CATEGORY = "MochiWrapper"
 
-    def process(self, model, positive, negative, steps, cfg, seed, height, width, num_frames, cfg_schedule=None, opt_sigmas=None, samples=None, fastercache=None):
+    def process(self, model, positive, negative, steps, cfg, seed, height, width, num_frames, cfg_schedule=None, opt_sigmas=None, samples=None, fastercache=None, context: execution_context.ExecutionContext=None):
         mm.unload_all_models()
         mm.soft_empty_cache()
 
